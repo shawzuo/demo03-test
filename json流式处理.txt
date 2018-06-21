@@ -1,0 +1,647 @@
+使用 Jackson 流式(Streaming) API 处理 JSON
+Jackson Jackson Streaming API JSON
+
+2016-2-19 / 阅读 2654 次 / 评论 0 条
+Jackson Streaming API 是 Jackson 底层的 JSON 处理 api，性能十分优秀，但是使用起来比较麻烦，不是太方便，因此平常我们开发时直接用 Jackson Streaming API 的时候并不是太多，而是选择 jackson 提供的另外两种 api：树模型和数据绑定。但是如果是处理特别庞大的 json 的时候可能还会用到性能最高的 Jackson Streaming API。本文主要介绍使用 Jackson Streaming API 来解析以及构造 JSON。
+
+
+
+1. 导入 Jackson-core jar 包
+Jackson Streaming API 主要在 jackson-core jar包中。在项目中通过 maven 导入该 jar 包。
+
+
+<dependency>
+    <groupId>com.fasterxml.jackson.core</groupId>
+    <artifactId>jackson-core</artifactId>
+    <version>2.7.0</version>
+</dependency>
+
+2. Jackson Streaming API 核心概念介绍
+Jackson Streaming API 使用时主要有 JsonFactory、JsonGenerator、JsonParser 几个关键类。
+
+JsonFactory：用来配置和构造JsonGenerator和JsonParser实例，JsonFactory线程安全，程序中可以共用一个 JsonFactory 实例。
+JsonGenerator：提供了丰富的 API 来构造 json 字符串。
+JsonParser：提供了丰富的 API 来解析 json 字符串。
+
+3. 使用 Jackson Streaming API 来构造 json 字符串
+构造 json 字符串主要用到 JsonGenerator 类，下面给出一个详细的例子，任何复杂的 json 都可以通过这种方式构造出来。
+
+
+
+package org.lifw.jackosn.streaming;
+ 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import org.junit.Test;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+ 
+public class StreamingAPITest {
+ 
+    //jsonFactory实例，线程安全。
+    private JsonFactory jsonFactory = new JsonFactory();
+     
+    @Test
+    public void testJsonGenerator() throws IOException {
+        OutputStream out = new FileOutputStream(new File("/Users/lifengwei/Downloads/json.txt"));
+ 
+        /**
+         * 获取 JsonGenerator 实例，JsonFactory 提供了若干重载方法，可以将构造后的json字符串输出到文件、OutputStream等
+         * JsonGenerator 实例需要关闭，这里采用jdk1.7中新增的try-with-resources自动资源管理机制
+         */
+        try(JsonGenerator generator = jsonFactory.createGenerator(out)) {
+             
+            /**
+             * 调用 JsonGenerator API 来生成 json 字符串
+             */
+             
+            //对象开始，即 "{"
+            generator.writeStartObject();
+             
+            /**
+             * 构造一个键值对，值是string类型。即 "name":"aaa"
+             * 这里采用的简化的api。这个api相当于writeFieldName("name");writeString("aaa");
+             */
+            generator.writeStringField("name", "aaa");
+            generator.writeStringField("email", "aaa@aa.com");
+            //构造一个键值对，值是number类型。即 "age":24
+            generator.writeNumberField("age", 24);
+             
+            //构造对象内的对象
+            generator.writeObjectFieldStart("pets");
+            generator.writeStringField("petName", "kitty");
+            generator.writeNumberField("petAge", 3);
+            generator.writeEndObject();
+             
+            //构造属组开始，即 "["
+            generator.writeArrayFieldStart("skills");
+            generator.writeString("java");
+            generator.writeString("linux");
+            generator.writeString("mysql");
+            //构造属组结束，即 "]"
+            generator.writeEndArray();
+             
+            //对象结束，即 "}"
+            generator.writeEndObject();
+        }
+         
+         
+    }
+}
+上述代码生成的 json 字符串如下
+
+
+{"name":"aaa","email":"aaa@aa.com","age":24,"pets":{"petName":"kitty","petAge":3},"skills":["java","linux","mysql"]}
+注意几点
+注意对象和数组构造时的结束符不要忘了；
+JsonGenerator 实例用完后要关闭；
+JsonFactory 实例全局共享来提高性能；
+
+4. 使用 Jackson Streaming API 来解析 json 字符串
+json 字符串解析主要用到 JsonParsor 、JsonToken，解析时的思路是将 json 字符串通过 json 边界分隔成若干的 JsonToken。先来解释下 JsonToken 的含义，看一个小例子
+
+
+package org.lifw.jackosn.streaming;
+ 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import org.junit.Test;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+ 
+public class StreamingAPITest {
+ 
+    //jsonFactory实例，线程安全。
+    private JsonFactory jsonFactory = new JsonFactory();
+     
+    private String jsonString = 
+            "{\"name\":\"aaa\",\"email\":\"aaa@aa.com\",\"age\":24,\"pets\":{\"petName\":\"kitty\",\"petAge\":3},\"skills\":[\"java\",\"linux\",\"mysql\"]}";
+     
+    @Test
+    public void testJsonParsor() throws JsonParseException, IOException {
+        JsonParser jsonParser = jsonFactory.createParser(jsonString);
+        System.out.println(jsonParser.getCurrentToken());
+        while(!jsonParser.isClosed()) {
+            JsonToken jsonToken = jsonParser.nextToken();
+            System.out.println(jsonToken);
+        }
+    }
+     
+}
+打印结果如下
+
+
+null
+START_OBJECT
+FIELD_NAME
+VALUE_STRING
+FIELD_NAME
+VALUE_STRING
+FIELD_NAME
+VALUE_NUMBER_INT
+FIELD_NAME
+START_OBJECT
+FIELD_NAME
+VALUE_STRING
+FIELD_NAME
+VALUE_NUMBER_INT
+END_OBJECT
+FIELD_NAME
+START_ARRAY
+VALUE_STRING
+VALUE_STRING
+VALUE_STRING
+END_ARRAY
+END_OBJECT
+null
+
+可以将 JsonToken 想象成指针，每调用jsonParser.nextToken();可以将指针向后移动一个位置，然后我们就可以针对每个位置取得它的值，例如根据对象的键来获取其对应的值。下面给出一个详细例子：
+
+package org.lifw.jackosn.streaming;
+ 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import org.junit.Test;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+ 
+public class StreamingAPITest {
+ 
+    //jsonFactory实例，线程安全。
+    private JsonFactory jsonFactory = new JsonFactory();
+    private String jsonString = 
+            "{\"name\":\"aaa\",\"email\":\"aaa@aa.com\",\"age\":24,\"pets\":{\"petName\":\"kitty\",\"petAge\":3},\"skills\":[\"java\",\"linux\",\"mysql\"]}";
+     
+    @Test
+    public void testJsonParsor2() throws JsonParseException, IOException {
+        JsonParser jsonParser = jsonFactory.createParser(jsonString);
+        while(!jsonParser.isClosed()) {
+            JsonToken jsonToken = jsonParser.nextToken();
+            //如果当前指针指在对象的键处，获取键的值
+            if(JsonToken.FIELD_NAME.equals(jsonToken)) {
+                String currentName = jsonParser.getCurrentName();
+                //将指针移动到该键的值处
+                jsonToken = jsonParser.nextToken();
+                //如果键是name，则将指针移动到它的值处并获取
+                if(currentName.equals("name")) {
+                    System.out.println("name=" + jsonParser.getValueAsString());
+                } else if(currentName.equals("skills")) {
+                    jsonToken = jsonParser.nextToken();
+                    while(!JsonToken.END_ARRAY.equals(jsonToken)) {
+                        //获取所有的skills
+                        System.out.println("skills=" + jsonParser.getValueAsString());
+                        jsonToken = jsonParser.nextToken();
+                    }
+                }
+            }
+        }
+    }
+}
+打印结果如下
+
+
+name=aaa
+skills=java
+skills=linux
+skills=mysql
+
+5. 总结
+从上面的讲解中可以看到 Jackson Streaming API 比较复杂，难以理解，而且容易出错，因此平常开发可能很多人都不会选择用 Jackson Streaming API 。但是由于 Jackson Streaming API  的性能比其他两种要高，因此如果你要从一个非常大的json字符串中取出几个值，那 Jackson Streaming API 就非常合适了。
+
+
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+
+
+最近在做一个需求，需要每月从一个别的数据系统同步一次数据过来。数据量大概90W条左右，数据接口只提供了一个JSON接口，接口返回报文为JSON，并且没有任何分页。这个数据量如果直接使用普通方式解析的话，肯定内存溢出。
+
+解决思路
+我们要保证内存溢出，那么就不能把得的数据全部存放在内存然后处理。通常我们在处理一些大的数据文件时也会有同样的情况，我们可能会在读取文件的流中一行一行的对数据进行处理，处理完的数据丢弃，将会被垃圾回收，这样一个很大的文件也可以保证正常处理。
+
+那么对于接口，实际响应报文也是一个数据流。我们是否可以边获取数据流，别解析JSON呢？
+
+FastJson：JSONReader
+我们首先看这个Reader的构造方法，正好是传入一个流，正好符合我们要求。
+
+public class JSONReader implements Closeable {
+
+    private final DefaultJSONParser parser;
+    private JSONStreamContext       context;
+
+    //注意这个构造方法，传入的数据对象是一个字符流
+    public JSONReader(Reader reader){
+        this(reader, new Feature[0]);
+    }
+
+    .....
+}
+
+
+数据读取，有多个类似readString这样的方法去读取数据。
+
+//读取一个String的数据
+public String readString() {
+    Object object;
+    if (context == null) {
+        object = parser.parse();
+    } else {
+        readBefore();
+        JSONLexer lexer = parser.lexer;
+        if (context.state == JSONStreamContext.StartObject && lexer.token() == JSONToken.IDENTIFIER) {
+            object = lexer.stringVal();
+            lexer.nextToken();
+        } else {
+            object = parser.parse();
+        }
+        readAfter();
+    }
+
+    return TypeUtils.castToString(object);
+}
+
+
+如何使用 
+假设我们有这样一个json的流
+{
+    "result":[
+        {
+            "name":"张三",
+            "age":20,
+            "amt":10129.06
+        },
+        {
+            "name":"李四",
+            "age":20,
+            "amt":10129.06
+        }
+    ],
+    "status":"success",
+    "message":"操作成功"
+}
+
+
+那么我们可以这么解析
+
+String jsonStr = "{\"result\":[{\"name\":\"张三\",\"age\":20,\"amt\":10129.06},{\"name\":\"李四\",\"age\":20,\"amt\":10129.06}],\"status\":\"success\",\"message\":\"操作成功\"}";
+StringReader stringReader = new StringReader(jsonStr);
+JSONReader jsonReader = new JSONReader(stringReader);
+//相当于开始读整个json的Object对象。
+jsonReader.startObject();
+while (jsonReader.hasNext()) {
+    String elem = jsonReader.readString();
+    System.out.println(elem);
+    //这么判断是为了防止对象顺序会乱，如果result,status等的顺序固定不需要判断
+    if ("result".equals(elem)) {
+        jsonReader.startArray();
+        while (jsonReader.hasNext()) {
+            jsonReader.startObject();
+            while (jsonReader.hasNext()) {
+                //这里我把所有value按照Object来统一处理.当然也可以根据实际类型调用其他方法
+                String itemKey = jsonReader.readString();
+                System.out.println(itemKey);
+                Object o = jsonReader.readObject();
+                String itemValue = null;
+                if (o != null) {
+                    itemValue = String.valueOf(o);
+                }
+                System.out.println(itemValue);
+            }
+            jsonReader.endObject();
+        }
+        jsonReader.endArray();
+    } else if ("status".equals(elem)) {
+        String s = jsonReader.readString();
+        System.out.println(s);
+    } else {
+        //不需要的数据，也必须读，可以不做处理
+        jsonReader.readString();
+    }
+}
+jsonReader.endObject();
+
+输出结果
+
+result
+name
+张三
+age
+20
+amt
+10129.06
+name
+李四
+age
+20
+amt
+10129.06
+status
+success
+message
+
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+
+
+
+
+
+
+
+
+
+
+jackson 用流的形式解析json
+2012年10月24日 17:10:59
+阅读数：7512
+工作中有个需求，就是用流的形式解析json文档。 我们采用了jackson框架来处理json文件。
+
+业务逻辑里有个特殊的需求，就是当解析到一个FIELD_NAME时，要得到他的完整名字（嵌套在很多层里）   而且还要知道这个FILED_NAME的类型，是object还是array还是基本类型等等。    但是用流解析时，parser过去之后就回不来了，而当我的parser在FIELD_NAME时，我需要知道parser的下一项是什么，而且我有要parser停留在FILED_NAME上，这样的话一个parser是做不到了    于是我用了两个parser，相当于两个指针，一前一后的遍历json文件。  
+
+可能表述的不是很清楚，还是直接看看代码吧
+
+
+[java] view plain copy
+package com.nothing.jackson;  
+  
+import java.io.File;  
+import java.io.IOException;  
+import java.util.ArrayList;  
+import java.util.HashMap;  
+import java.util.List;  
+import java.util.Map;  
+import java.util.regex.Pattern;  
+  
+import org.apache.commons.lang.StringUtils;  
+  
+import com.fasterxml.jackson.core.JsonFactory;  
+import com.fasterxml.jackson.core.JsonParser;  
+import com.fasterxml.jackson.core.JsonToken;  
+  
+public class Better {  
+    @SuppressWarnings("boxing")  
+    public static void main(String[] args) throws IOException, Exception {  
+        JsonFactory f = new JsonFactory();  
+        JsonParser p = f.createJsonParser(new File("c:/countries222.json"));  
+        JsonParser q = f.createJsonParser(new File("c:/countries222.json"));  
+        final String TOP_ARRAY = "[TopArray]";  
+        final String TOP_OBJECT = "TopObj";  
+        List<String> fatherList = new ArrayList<String>();  
+        List<String> nameList = new ArrayList<String>();  
+        Map<String, Integer> map = new HashMap<String, Integer>();  
+        q.nextToken();// q is the next token of p  
+  
+        while (p.nextToken() != null) {  
+            q.nextToken();  
+            // System.out.println("p--->" + p.getCurrentToken());  
+            // System.out.println("q--->" + q.getCurrentToken());  
+            if (p.getCurrentToken() == JsonToken.START_OBJECT) {  
+                if (p.getCurrentName() != null) {// 非数组中的obj  
+                    fatherList.add(p.getCurrentName());  
+                } else if (p.getCurrentName() == null ) {// 数组中的obj或者TopObj  
+                    if(fatherList.size()==0){//TopObj  
+                        fatherList.add(TOP_OBJECT);  
+                    }else if (fatherList.size()!=0){//数组中的Obj  
+                        String father = StringUtils.join(fatherList, '.');  
+                        map.put(father, map.get(father)+1);  
+                    }  
+                }  
+            }  
+  
+            if (p.getCurrentToken() == JsonToken.END_OBJECT) {  
+                if (!"".equals(fatherList) && p.getCurrentName() != null) fatherList.remove(fatherList.size() - 1);  
+            }  
+            if (p.getCurrentToken() == JsonToken.START_ARRAY) {  
+                if (p.getCurrentName() != null) {  
+                    fatherList.add("[" + p.getCurrentName() + "]");  
+                    String father = StringUtils.join(fatherList, ".");  
+                    map.put(father, 0);  
+                } else if (p.getCurrentName() == null) {//即这个array是topArray  
+                    fatherList.add(TOP_ARRAY);  
+                    String father = StringUtils.join(fatherList, '.');  
+                    map.put(father, 0);  
+                }  
+            }  
+  
+            if (p.getCurrentToken() == JsonToken.END_ARRAY) {  
+                String father = StringUtils.join(fatherList, ".");  
+                if (fatherList.size() == 0) {  
+                    father = TOP_ARRAY;  
+                }  
+                System.out.println(father + " size : \t" + map.get(father));  
+                fatherList.remove("[" + p.getCurrentName() + "]");  
+            }  
+  
+            if (p.getCurrentToken() == JsonToken.FIELD_NAME) {  
+                if (q.getCurrentToken() == JsonToken.START_ARRAY) {  
+                    // 如果p指向的是个数组，名字为father+[text]  
+                    nameList.addAll(fatherList);  
+                    nameList.add("[" + p.getText() + "]");  
+                    String name = StringUtils.join(nameList, '.');  
+                    System.out.println("Enconter: \t" + p.getText());  
+                    System.out.println("propertyName: \t" + name);  
+                    System.out.println("Type: \t\t" + q.getCurrentToken());// 当p指向的是FIELD_NAME时，要用q来获得类型  
+                    nameList.removeAll(nameList);  
+                    System.out.println("--------------------------------------");  
+                } else if (p.getCurrentToken() == JsonToken.FIELD_NAME  
+                        && (q.getCurrentToken() == JsonToken.START_OBJECT || Pattern.matches("VALUE_\\w+", q.getCurrentToken().toString()))) {  
+                    // 如果p指向的不是数组，名字为 father+text  
+                    nameList.addAll(fatherList);  
+                    nameList.add(p.getText());  
+                    String name = StringUtils.join(nameList, '.');  
+                    System.out.println("Enconter: \t" + p.getText());  
+                    System.out.println("propertyName: \t" + name);  
+                    System.out.println("Type: \t\t" + q.getCurrentToken());// 当p指向的是FIELD_NAME时，要用q来获得类型  
+                    nameList.removeAll(nameList);  
+                    System.out.println("--------------------------------------");  
+                }  
+            }  
+  
+            if (Pattern.matches("VALUE_\\w+", p.getCurrentToken().toString())) {  
+                if (p.getCurrentName() != null) {// 非数组中的value  
+                    nameList.addAll(fatherList);  
+                    nameList.add(p.getCurrentName());  
+                    String name = StringUtils.join(nameList, '.');  
+                    System.out.println("Enconter: \t" + p.getText());  
+                    System.out.println("propertyName: \t" + name);  
+                    nameList.removeAll(nameList);  
+                    System.out.println("Type: \t\t" + p.getCurrentToken());// 当p指向VALUE_*时，通过p自己可以获得类型  
+                    System.out.println("--------------------------------------");  
+                } else if (p.getCurrentName() == null) {// 数组中的value  
+                    String father = StringUtils.join(fatherList, '.');  
+                    if (fatherList.size() == 0) {  
+                        father = TOP_ARRAY;  
+                    }  
+                    System.out.println("Enconter: \t" + p.getText());  
+                    System.out.println("propertyName: \t" + father);  
+                    map.put(father, map.get(father) + 1);  
+                    System.out.println("Type: \t\t" + p.getCurrentToken());  
+                    System.out.println("--------------------------------------");  
+                }  
+            }  
+        }  
+  
+        p.close();  
+    }  
+}  
+
+c:/coutries222.json文档如下：
+
+[plain] view plain copy
+{  
+    "国家": {  
+        "中国": {  
+            "省份": [  
+                {  
+                    "名称": "浙江",  
+                    "城市": [  
+                        "杭州",  
+                        "宁波"  
+                    ]  
+                },  
+                {  
+                    "名称": "江苏",  
+                    "城市": [  
+                        "苏州",  
+                        "南京",  
+                        "无锡",  
+                        "徐州"  
+                    ]  
+                }  
+            ],  
+            "area" : 9600  
+        },  
+        "其他国家": [  
+            "英国",  
+            "德国",  
+            "日本"  
+        ]  
+    }  
+}  
+
+输出结果如下：
+
+
+[plain] view plain copy
+Enconter:   国家  
+propertyName:   TopObj.国家  
+Type:       START_OBJECT  
+--------------------------------------  
+Enconter:   中国  
+propertyName:   TopObj.国家.中国  
+Type:       START_OBJECT  
+--------------------------------------  
+Enconter:   省份  
+propertyName:   TopObj.国家.中国.[省份]  
+Type:       START_ARRAY  
+--------------------------------------  
+Enconter:   名称  
+propertyName:   TopObj.国家.中国.[省份].名称  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   浙江  
+propertyName:   TopObj.国家.中国.[省份].名称  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   城市  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       START_ARRAY  
+--------------------------------------  
+Enconter:   杭州  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   宁波  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       VALUE_STRING  
+--------------------------------------  
+TopObj.国家.中国.[省份].[城市] size :   2  
+Enconter:   名称  
+propertyName:   TopObj.国家.中国.[省份].名称  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   江苏  
+propertyName:   TopObj.国家.中国.[省份].名称  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   城市  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       START_ARRAY  
+--------------------------------------  
+Enconter:   苏州  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   南京  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   无锡  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   徐州  
+propertyName:   TopObj.国家.中国.[省份].[城市]  
+Type:       VALUE_STRING  
+--------------------------------------  
+TopObj.国家.中国.[省份].[城市] size :   4  
+TopObj.国家.中国.[省份] size :    2  
+Enconter:   area  
+propertyName:   TopObj.国家.中国.area  
+Type:       VALUE_NUMBER_INT  
+--------------------------------------  
+Enconter:   9600  
+propertyName:   TopObj.国家.中国.area  
+Type:       VALUE_NUMBER_INT  
+--------------------------------------  
+Enconter:   其他国家  
+propertyName:   TopObj.国家.[其他国家]  
+Type:       START_ARRAY  
+--------------------------------------  
+Enconter:   英国  
+propertyName:   TopObj.国家.[其他国家]  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   德国  
+propertyName:   TopObj.国家.[其他国家]  
+Type:       VALUE_STRING  
+--------------------------------------  
+Enconter:   日本  
+propertyName:   TopObj.国家.[其他国家]  
+Type:       VALUE_STRING  
+--------------------------------------  
+TopObj.国家.[其他国家] size :     3  
+
+
+
+
+
